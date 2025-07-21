@@ -16,3 +16,32 @@
 #    pipelines:
 #      traces:
 #        exporters: [spanmetrics, otlphttp/example]
+
+extensions:
+  basicauth/grafanacloud:
+    client_auth:
+      username: ${GRAFANA_INSTANCE_ID}
+      password: ${GRAFANA_CLOUD_APIKEY}
+
+exporters:
+  otlphttp/grafanacloud:
+    auth:
+      authenticator: basicauth/grafanacloud
+    endpoint: ${GRAFANA_OTLP_ENDPOINT}
+
+service:
+  extensions: [basicauth/grafanacloud]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/grafanacloud, spanmetrics]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [batch]
+      exporters: [otlphttp/prometheus, otlphttp/grafanacloud]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlphttp/grafanacloud]
+
