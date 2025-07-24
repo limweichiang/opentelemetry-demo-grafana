@@ -1,21 +1,3 @@
-# Copyright The OpenTelemetry Authors
-# SPDX-License-Identifier: Apache-2.0
-
-# extra settings to be merged into OpenTelemetry Collector configuration
-# do not delete this file
-
-## Example configuration for sending data to your own OTLP HTTP backend
-## Note: the spanmetrics exporter must be included in the exporters array
-## if overriding the traces pipeline.
-##
-#  exporters:
-#    otlphttp/example:
-#      endpoint: <your-endpoint-url>
-#
-#  service:
-#    pipelines:
-#      traces:
-#        exporters: [spanmetrics, otlphttp/example]
 
 extensions:
   basicauth/grafanacloud:
@@ -23,25 +5,78 @@ extensions:
       username: ${GRAFANA_INSTANCE_ID}
       password: ${GRAFANA_CLOUD_APIKEY}
 
+receivers:
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock # default; if this is not the Docker socket path, update to the correct path
+    metrics:
+      container.network.io.usage.rx_packets:
+        enabled: true
+      container.network.io.usage.tx_packets:
+        enabled: true
+      container.cpu.usage.system:
+        enabled: true
+      container.memory.rss:
+        enabled: true
+      container.blockio.io_serviced_recursive:
+        enabled: true
+      container.uptime:
+        enabled: true
+      container.memory.hierarchical_memory_limit:
+        enabled: true
+
+processors:
+  resourcedetection/cloud:
+    detectors: [gcp, ecs, ec2, azure]
+
+  resourcedetection/docker:
+    detectors: [env, docker]
+    timeout: 2s
+    override: true
+
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "prod"
+        action: upsert
+
 exporters:
   otlphttp/grafanacloud:
     auth:
       authenticator: basicauth/grafanacloud
     endpoint: ${GRAFANA_OTLP_ENDPOINT}
+  datadog:
+    traces:
+      compute_stats_by_span_kind: true
+      trace_buffer: 500
+    #hostname: "otel-collector-docker"
+    api:
+      site: ${env:DD_SITE_PARAMETER}
+      key: ${env:DD_API_KEY}
+
+connectors:
+  grafanacloud:
+    host_identifiers: ["host.name"]
+  datadog/connector:
+    traces:
+      compute_stats_by_span_kind: true
 
 service:
   extensions: [basicauth/grafanacloud]
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/grafanacloud, spanmetrics]
+      processors: [memory_limiter, resourcedetection/cloud, resourcedetection/docker, resource, transform, batch]
+      exporters: [spanmetrics, otlphttp/grafanacloud, grafanacloud, datadog, datadog/connector]
     metrics:
-      receivers: [otlp, spanmetrics]
-      processors: [batch]
-      exporters: [otlphttp/prometheus, otlphttp/grafanacloud]
-    logs:
-      receivers: [otlp]
+      receivers: [docker_stats, httpcheck/frontend-proxy, hostmetrics, nginx, otlp, redis, spanmetrics, datadog/connector]
+      processors: [memory_limiter, resourcedetection/cloud, resourcedetection/docker, resource, batch]
+      exporters: [otlphttp/prometheus, otlphttp/grafanacloud, datadog]
+    metrics/grafanacloud:
+      receivers: [grafanacloud]
       processors: [batch]
       exporters: [otlphttp/grafanacloud]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection/cloud, resourcedetection/docker, resource, batch]
+      exporters: [opensearch, otlphttp/grafanacloud, datadog]
 
